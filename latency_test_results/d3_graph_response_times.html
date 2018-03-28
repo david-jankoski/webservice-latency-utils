@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html>
+  
+  <head>
+    <meta charset="utf-8">
+    <title>Opencpu Load Tests</title>
+  </head>
+
+  <body>
+
+  	  <h4>Choose the concurrency level (possible values 3-15)</h4>
+  	  <input name="concurrencyInputBox" type="text" value="8">
+
+  	  <div id="chart"></div> 
+
+  </body>
+
+  <script src="https://d3js.org/d3.v4.js"></script>
+    
+  <script>
+  
+
+  var margin = {top: 20, right: 100, bottom: 20, left: 100},
+      width = window.innerWidth - margin.left - margin.right,
+      height = window.innerHeight - margin.top - margin.bottom;
+
+
+  document.getElementsByName("concurrencyInputBox")[0].addEventListener('change', updateChart);
+  
+  var svg_main = d3.select("#chart")
+	  			   .append("svg")
+	  			   	 .attr("width", width + margin.left + margin.right)
+	  			   	 .attr("height", height + margin.top + margin.bottom);
+  
+  var svg = svg_main.append("g")
+  			  		  .attr("class", "chart")
+  			  		  .attr("transform", "translate(" + margin.left + "," + margin.top +")");
+
+  var xscale = d3.scaleLinear().rangeRound([0, width]),
+  	  yscale = d3.scaleLinear().rangeRound([height, 0]),
+	  
+	  xaxis = d3.axisBottom(xscale).ticks(15),
+      yaxis = d3.axisLeft(yscale).ticks(15);
+
+  
+  function transition(path) {
+  	path.transition()
+      	.duration(2500)
+      	.attrTween("stroke-dasharray", tweenDash)
+      	.each("end", function() { d3.select(this).call(transition); });
+  }
+
+  function tweenDash() {
+  	var l = this.getTotalLength(),
+  	i = d3.interpolateString("0," + l, l + "," + l);
+  	return function(t) { return i(t); };
+  }
+
+  function updateChart(){
+
+  	svg.remove();
+
+  	svg = svg_main.append("g")
+  				    .attr("class", "chart")
+  					.attr("transform", "translate(" + margin.left + "," + margin.top +")");
+
+	  	var inputfile = "latency_mr500_con" + this.value + "_results.json";
+	  	console.log(inputfile);
+
+		d3.json(inputfile, (error, data) => {
+
+		  	if (error) {
+		  		console.error(error);
+		  		return;
+		  	}
+
+		  	data = data.sort((x,y) => d3.ascending(x.requestIndex, y.requestIndex));
+
+		  	//x = data.requestIndex
+		  	//y = data.meanLatencyMs
+
+		  	xscale.domain(d3.extent(data, d => d.requestIndex));
+		  	yscale.domain([
+		  		(d3.min(data, d => d.meanLatencyMs) - 200),
+		  		(d3.max(data, d => d.meanLatencyMs) + 200)
+		  	]);
+
+		  	var meanline = d3.line()
+		  					 .x( d => xscale(d.requestIndex))
+		  					 .y( d => yscale(d.meanLatencyMs));
+
+		  	
+		  	svg.append("g")
+	     	     .attr("class", "xaxis")
+	     	     .attr("transform", "translate(0, " + height + ")")
+	     	     .call(xaxis);
+
+	     	svg.append("text")             
+      		     .attr("transform",
+		               "translate(" + (width/2) + " , " + 
+		                              (height - (margin.bottom + 10) ) + ")")
+      			 .style("text-anchor", "middle")
+      			 .text("Request Index");
+
+	     	
+	     	svg.append("g")
+	     	     .attr("class", "yaxis")
+	     	     .call(yaxis);
+		  
+		    // text label for the y axis
+		    svg.append("text")
+		         .attr("transform", "rotate(-90)")
+		         .attr("y", 0 - (margin.left - 30) )
+		         .attr("x",0 - (height / 2))
+		         .attr("dy", "1em")
+		         .style("text-anchor", "middle")
+		         .text("Average Response Time (milliseconds)");
+
+		    svg.append("path")
+		  	     .attr("class", "meanline")
+		  	   .datum(data)
+		  	     .style("stroke", "black")
+	     	     .style("fill", "none")
+	     	     .attr("d", meanline)
+	     	     .call(transition);
+
+		})
+	}
+
+
+
+  </script>
+
+</html>
+
