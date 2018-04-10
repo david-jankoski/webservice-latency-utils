@@ -17,7 +17,7 @@ const maxreq = +process.argv[2],
 //  Construct output path to store results
 
 // time now in format YYYYmmddHHMMSS
-const time_now = new Date().toISOString().replace(/-|T|:/g, "").split(".")[0],
+const time_now = new Date().toISOString().replace(/-|T|:/g, "").split(".")[0];
 	  
 	  // extract sub test url (smth like hellotripv2-demo)
 	  //
@@ -28,17 +28,17 @@ const time_now = new Date().toISOString().replace(/-|T|:/g, "").split(".")[0],
 	  // sub_testurl = testurl.replace(/^http(?:s)?\:\/\/(?:www\.)?/i, "").split(".")[0],
 	  //
 	  // therefore the workaround checks if testurl is on localhost or smth else
-	  sub_testurl = 
+const sub_testurl = 
 	  		testurl.includes("localhost") ? "local" : 
 	  		testurl.replace(/^http(?:s)?\:\/\/(?:www\.)?/i, "").split(".")[0];
 
 	  // format : [system time]_[test url]_[max reqs]_[conc].json
 	  // example: 20180404151552_website-demo_555_7.json      
-      results_path = 
+const results_path = 
       	time_now + "_" + 
         sub_testurl + "_" + 
         maxreq + "_" + 
-        conc + "_" + 
+        conc + 
         ".json";
 
 console.log("\n...Starting loadtest on url='%s' with maxreq=%j and conc=%j... \n", testurl, maxreq, conc);
