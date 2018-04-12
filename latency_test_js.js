@@ -8,11 +8,13 @@ const fs = require("fs");
 fs.access("lookup_result.json", err => console.log(err));
 const lookres = fs.readFileSync("lookup_result.json", "utf8");
 
+// TODO make this arg
+const results_dir = "latency_analysis/results/";
+
 // Parse cmd line args
 const maxreq = +process.argv[2],
 	  conc = +process.argv[3],
 	  testurl = process.argv[4];
-
 
 //  Construct output path to store results
 
@@ -35,13 +37,14 @@ const sub_testurl =
 	  // format : [system time]_[test url]_[max reqs]_[conc].json
 	  // example: 20180404151552_website-demo_555_7.json      
 const results_path = 
+		results_dir +
       	time_now + "_" + 
         sub_testurl + "_" + 
         maxreq + "_" + 
         conc + 
         ".json";
 
-console.log("\n...Starting loadtest on url='%s' with maxreq=%j and conc=%j... \n", testurl, maxreq, conc);
+console.log("\n...Starting loadtest on \n\turl='%s' \n\tmaxreq=%j \n\tconc=%j \n\tresults_path='%s' \n", testurl, maxreq, conc, results_path);
 
 var testres = [];
 
@@ -90,8 +93,6 @@ loadtest.loadTest(options, function(error, result)
 
     console.log("Tests run successfully! Writing out results to %s", results_path);
     
-    fs.writeFileSync(
-    	"latency_analysis/results/" + results_path,
-    	JSON.stringify(testres), "utf8");
+    fs.writeFileSync(results_path, JSON.stringify(testres), "utf8");
 
 });
