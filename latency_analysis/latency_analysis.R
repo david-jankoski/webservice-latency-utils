@@ -1,51 +1,121 @@
-library("jsonlite")
 library("tidyverse")
+library("jsonlite")
 
-results_dir <- "C:/Users/David_Jankoski/Desktop/opencpu_perftest/latency_test_results/chng_conf/"
+results_dir <- "C:/Users/David_Jankoski/Desktop/opencpu_perftest/latency_analysis/results/"
 
-file_pattern <- "latency_mr500*"
+file_pattern <- ".json$"
 resfiles <- list.files(results_dir, pattern = file_pattern, full.names = TRUE)
 
 names(resfiles) <-
   list.files(results_dir, pattern = file_pattern, full.names = FALSE) %>%
-  stringr::str_extract("mr\\d+_con\\d+")
+  stringr::str_extract(".*(?=\\.json)")
 
 results <-
   resfiles %>%
-  map_df(~ fromJSON(.x, simplifyVector = TRUE, flatten = TRUE), .id = "source")
-
+  purrr::map_df(~ jsonlite::fromJSON(.x, simplifyVector = TRUE, flatten = TRUE), .id = "source")
 
 results <-
   results %>%
+  # separate out source col into indiv parts
+  tidyr::separate(
+    source,
+    into = c("timestamp", "source", "max_requests", "concurrency"),
+    sep = "_", remove = TRUE, convert = TRUE) %>%
+  # conver timestamp to char (save space, unless needed further down?)
   mutate(
-    max_requests =
-      as.integer(
-        stringr::str_sub(
-          stringr::str_extract(source, "mr\\d+"),
-          start = 3L
-        )
-      ),
+    timestamp = as.character(timestamp)
+  )
 
-    concurrency =
-      as.integer(
-        stringr::str_sub(
-          stringr::str_extract(source, "con\\d+"),
-          start = 4L
-        )
-      )
+# replace weird characters in col names ("errorCodes.-1")
+err_cols <- grep("error", colnames(results))
+colnames(results)[err_cols] <-
+  gsub("[[:punct:]]", "",
+       colnames(results)[err_cols]
   )
 
 
-table(results$max_requests, results$concurrency,
-      dnn = c("max_requests", "concurrency"))
+results %>%
+  ggplot(., aes(requestIndex, meanLatencyMs, colour =  concurrency)) +
+  geom_point() + geom_line(aes(group = concurrency)) +
+  facet_wrap( ~ source) +
+  scale_color_continuous(low = "green3", high = "red3") +
+  labs(
+    title = paste0("mean response times for different sources and concurrency")
+  )
+
+# stats for % successful requests, average of average latency
+res_stats <-
+  results %>%
+  group_by(source, concurrency, max_requests) %>%
+  summarise(
+    n_success = n(),
+    mean_latency_sec = mean(meanLatencyMs) / 1000
+  ) %>%
+  mutate(
+    n_success_perc = n_success / max_requests * 100
+  )
+# stats for errors
+errs <-
+  results %>%
+  group_by(source, concurrency, max_requests) %>%
+  summarise_at(
+    vars(contains("error")),
+    funs(max)
+  )
+
+# join both stats dfs
+latency_stats <-
+  left_join(res_stats, errs, by = c("source", "concurrency", "max_requests"))
+
+# add cpu & mem of docker containers
+latency_stats <-
+  latency_stats %>%
+  mutate(
+    specs =
+      case_when(
+        source == "hellotripv2-demo" ~ "1-1",
+        source == "hellotripv2-demo2" ~ "1-4",
+        source == "hellotripv2-demo3" ~ "1-8",
+        source == "local" ~ "1-1",
+        source == "local2" ~ "1-4",
+        source == "local3" ~ "1-8"
+      ),
+    host = ifelse(grepl("local", source), "local", "azure")
+  ) %>%
+  tidyr::separate(specs, into = c("cpu", "mem"), sep = "-", remove = TRUE, convert = TRUE)
+
+
+ggplot(latency_stats, aes(concurrency, mean_latency_sec, colour = host)) +
+  geom_point() +
+  geom_line(aes(group = source)) +
+  scale_x_continuous(breaks = 1:12, limits = c(1,12)) +
+  scale_y_continuous(breaks = seq(0,18,2), limits = c(0,18)) +
+  facet_wrap( ~ cpu + mem,
+              labeller = function(x) list(paste("Cpu:", x$cpu, "Mem:", x$mem))
+  ) +
+  labs(
+    title = "Average response times (sec) between different cpu/mem configs"
+  ) +
+  scale_colour_brewer(palette = "Dark2")
+
+
+
+
+
+# rethink -------
+
+
 
 # helper fun - find max but if -Inf ret 0
-sum_or_zero <- function(err_col) {
+# to avoid this
+# max(rep(NA_real_, 10), na.rm = T)
+inf_to_zero <- function(err_col) {
   out <- max(err_col, na.rm = TRUE)
   ifelse(!is.finite(out), 0, out)
 }
+
 # helper fun - if col exists apply fun else NULL
-# conditionally apply functiom
+# conditionally apply function
 cond_apply_fun <- function(col, fun, env) {
 
   col <- substitute(col)
@@ -59,15 +129,22 @@ cond_apply_fun <- function(col, fun, env) {
   res
 }
 
+min_if_noerr <- function(err_col, lat_col) {
+
+  min(lat_col[is.na(err_col)]) / 1000
+
+}
+# summarise stats by source, max requests and concurrency level
 res_by_con_maxreq <-
   results %>%
-  group_by(concurrency, max_requests) %>%
+  group_by(source, concurrency, max_requests) %>%
   summarise(n_success = n(),
-            err_1 =   cond_apply_fun(`errorCodes.-1`,  sum_or_zero, environment()),
-            err_400 = cond_apply_fun(`errorCodes.400`, sum_or_zero,environment()),
-            err_500 = cond_apply_fun(`errorCodes.500`, sum_or_zero,environment()),
+            err_1 =   cond_apply_fun(`errorCodes.-1`,  inf_to_zero, environment()),
+            err_400 = cond_apply_fun(`errorCodes.400`, inf_to_zero,environment()),
+            err_500 = cond_apply_fun(`errorCodes.500`, inf_to_zero,environment()),
             avg_response = mean(meanLatencyMs) / 1000,
             min_response = min(minLatencyMs) / 1000,
+            min_response2 = min_if_noerr(err_1, minLatencyMs),
             max_response = max(maxLatencyMs) / 1000
   ) %>%
   mutate(
@@ -75,16 +152,16 @@ res_by_con_maxreq <-
   ) %>%
   select(concurrency:err_500, tot_err, avg_response:max_response)
 
-
+# summarise stats by source, concurrency level
 res_by_con <-
   results %>%
-  group_by(concurrency) %>%
+  group_by(source, concurrency) %>%
   summarise(n_tot = sum(unique(max_requests)),
             n_success = n(),
             perc_success = n_success / n_tot * 100,
-            err_1 =   cond_apply_fun(`errorCodes.-1`, sum_or_zero, environment()),
-            err_400 = cond_apply_fun(`errorCodes.400`, sum_or_zero, environment()),
-            err_500 = cond_apply_fun(`errorCodes.500`, sum_or_zero, environment()),
+            err_1 =   cond_apply_fun(`errorCodes.-1`, inf_to_zero, environment()),
+            err_400 = cond_apply_fun(`errorCodes.400`, inf_to_zero, environment()),
+            err_500 = cond_apply_fun(`errorCodes.500`, inf_to_zero, environment()),
             avg_response = mean(meanLatencyMs) / 1000,
             min_response = min(minLatencyMs) / 1000,
             max_response = max(maxLatencyMs) / 1000
